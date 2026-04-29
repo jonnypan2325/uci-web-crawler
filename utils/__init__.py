@@ -1,7 +1,7 @@
 import os
 import logging
 from hashlib import sha256
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urldefrag, urlunparse
 
 def get_logger(name, filename=None):
     logger = logging.getLogger(name)
@@ -30,6 +30,17 @@ def get_urlhash(url):
         f"{parsed.query}/{parsed.fragment}".encode("utf-8")).hexdigest()
 
 def normalize(url):
+
+    # strip fragment so in page links are not treated as different urls.
+    url, fragment = urldefrag(url)
+
+    # lowercase the scheme and hostname
+    parsed = urlparse(url)
+    scheme_lower = parsed.scheme.lower()
+    netloc_lower = parsed.netloc.lower()
+    parsed = parsed._replace(scheme=scheme_lower, netloc=netloc_lower)
+
+    url = urlunparse(parsed)
     if url.endswith("/"):
         return url.rstrip("/")
     return url
