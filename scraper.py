@@ -1,7 +1,73 @@
 import re
 from urllib.parse import urlparse, urljoin, urldefrag
 from bs4 import BeautifulSoup
+import os
+import json
+from collections import defaultdict
 
+analytics = "analytics.json"
+save_interval = 50
+pages_crawled_since_prev_save = 0
+
+
+def load_analytics():
+    global unique_pages, longest_page, subdomains, word_counts
+
+    word_counts = defaultdict(int)
+    longest_page = ("", 0)
+    subdomains = defaultdict(set)
+    unique_pages = set()
+
+    if not os.path.exists(analytics):
+        return
+    try:
+        with open(analytics, "r") as f:
+            data = json.load(f)
+            unique_pages = set(data.get("unique_pages", []))
+            longest_page = tuple(data.get("longest_page", ("", 0)))
+            subdomains = defaultdict(set)
+            word_counts = defaultdict(int, data.get("word_counts", {}))
+
+            # convert subdomain lists to sets
+            for subdomain, pages in data.get("subdomains", {}).items():
+                subdomains[subdomain] = set(pages)
+    except Exception as e:
+        # start from scratch if there's an issue loading analytics
+        unique_pages = set()
+        word_counts = defaultdict(int)
+        longest_page = ("", 0)
+        subdomains = defaultdict(set)
+
+def save_analytics():
+    data = {
+        "unique_pages": list(unique_pages),
+        "longest_page": longest_page,
+        "subdomains": {subdomain: list(pages) for subdomain, pages in subdomains.items()},
+        "word_counts": dict(word_counts)
+    }
+    
+    # write to a temp file and then resave to avoid corruption if program is interrupted during save
+    temp_file = analytics + ".tmp"
+    with open(temp_file, "w") as f:
+        json.dump(data, f, indent=4)
+    os.replace(temp_file, analytics)
+
+def generate_report():
+    top_words = sorted(word_counts.items(), key=lambda x: (-x[1], x[0]))[:50]
+
+    sub_domain_report = sorted(f"{host} ({len(pages)} pages)" for host, pages in subdomains.items())
+    with open("report.txt", "w", encoding="utf-8") as f:
+        f.write(f"Number of unique pages: {len(unique_pages)}\n\n")
+        f.write(f"Longest page: {longest_page[0]} ({longest_page[1]} words)\n\n")
+        f.write("Top 50 most common words:\n")
+        for word, count in top_words:
+            f.write(f"  {word}: {count}\n")
+        f.write("\nSubdomains under uci.edu:\n")
+        for line in sub_domain_report:
+            f.write(f"  {line}\n")
+    
+
+    
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
