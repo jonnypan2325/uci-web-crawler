@@ -1,6 +1,8 @@
 import re
 from urllib.parse import urlparse
 
+ALLOWED_DOMAIN_SUFFIXES = {"ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu"}
+
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
@@ -23,8 +25,12 @@ def is_valid(url):
     # There are already some conditions that return False.
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in set(["http", "https"]):
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not any(host == suffix or host.endswith("." + suffix) 
+            for suffix in ALLOWED_DOMAIN_SUFFIXES): 
+            # check if the host is in the allowed domain suffixes or a complete match
             return False
+
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
             + r"|png|tiff?|mid|mp2|mp3|mp4"
