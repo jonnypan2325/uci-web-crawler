@@ -68,6 +68,8 @@ def generate_report():
     
 
     
+ALLOWED_DOMAIN_SUFFIXES = {"ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu"}
+
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
@@ -124,12 +126,11 @@ def is_valid(url):
     # There are already some conditions that return False.
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in set(["http", "https"]):
-            return False
         
         # only crawl urls in the domain mentioned on canvas
         if not re.match(r"^(.*\.)?(ics|cs|stat|informatics)\.uci\.edu$", parsed.netloc.lower()):
             return False
+
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
             + r"|png|tiff?|mid|mp2|mp3|mp4"
