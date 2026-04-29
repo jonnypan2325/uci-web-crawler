@@ -128,7 +128,10 @@ def is_valid(url):
         parsed = urlparse(url)
         
         # only crawl urls in the domain mentioned on canvas
-        if not re.match(r"^(.*\.)?(ics|cs|stat|informatics)\.uci\.edu$", parsed.netloc.lower()):
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not any(host == suffix or host.endswith("." + suffix) 
+            for suffix in ALLOWED_DOMAIN_SUFFIXES): 
+            # check if the host is in the allowed domain suffixes or a complete match
             return False
 
         return not re.match(
