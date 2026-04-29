@@ -1,5 +1,6 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin, urldefrag
+from bs4 import BeautifulSoup
 
 ALLOWED_DOMAIN_SUFFIXES = {"ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu"}
 
@@ -17,7 +18,41 @@ def extract_next_links(url, resp):
     #         resp.raw_response.url: the url, again
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
-    return list()
+
+
+    # only parse if the response is valid and has content
+    if resp.status != 200:
+        return list()
+    elif resp.raw_response is None:
+        return list()
+    elif not resp.raw_response.content:
+        return list()
+    
+    # only parse if the content type is html, not pdfs or images or other files
+    content_type = resp.raw_response.headers.get("Content-Type", "")
+    if content_type and "text/html" not in content_type:
+        return list()
+    
+    # parse the content with beautifulsoup]
+    try: 
+        soup = BeautifulSoup(resp.raw_response.content, "lxml")
+    except Exception as e:
+        return list()
+    
+    # I initially wanted to use a set here to avoid duplicates, but frontier is already doing that check
+    # extract links and normalize
+    # make sure not empty and not a link that we don't wanna crawl
+    extracted_links = []
+    for anchor in soup.find_all("a", href=True):
+        href = anchor["href"]
+        if not href: 
+            continue
+        if href.startswith(("mailto:", "javascript:", "tel:", "ftp:")):
+            continue
+        absolute = urljoin(resp.raw_response.url, href)
+        extracted_links.append(absolute)
+
+    return extracted_links
 
 def is_valid(url):
     # Decide whether to crawl this url or not. 
@@ -25,10 +60,9 @@ def is_valid(url):
     # There are already some conditions that return False.
     try:
         parsed = urlparse(url)
-        host = (parsed.hostname or "").lower().rstrip(".")
-        if not any(host == suffix or host.endswith("." + suffix) 
-            for suffix in ALLOWED_DOMAIN_SUFFIXES): 
-            # check if the host is in the allowed domain suffixes or a complete match
+        
+        # only crawl urls in the domain mentioned on canvas
+        if not re.match(r"^(.*\.)?(ics|cs|stat|informatics)\.uci\.edu$", parsed.netloc.lower()):
             return False
 
         return not re.match(
