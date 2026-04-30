@@ -112,7 +112,8 @@ def extract_next_links(url, resp):
         return list()
 
     # Avoid really really large files. 10MB is a lot lot. 
-    if len(resp.raw_response.content) > 10_000_000:
+    content_size = len(resp.raw_response.content)
+    if content_size > 10_000_000:
         return list()
 
     # parse the content with beautifulsoup]
@@ -133,7 +134,7 @@ def extract_next_links(url, resp):
 
     # Avoid large pages with low information content.
     # 1 MB , assuming 30%$ of html is readable text, is 300KB of text. Assuming ASCII and 6 chars a word, thats 50k words approx.
-    if content_size > 1_000_000 and len(words_lowercase) < 500: # less than 1% density of words per expected text size, pretty reasonable                                                                               
+    if content_size > 1_000_000 and len(words_lowercase) < 500: # less than 1% density of words per expected text size, pretty reasonable
         return list() 
     
     global pages_crawled_since_prev_save, longest_page
