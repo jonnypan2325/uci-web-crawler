@@ -110,7 +110,11 @@ def extract_next_links(url, resp):
     content_type = resp.raw_response.headers.get("Content-Type", "")
     if content_type and "text/html" not in content_type:
         return list()
-    
+
+    # Avoid really really large files. 10MB is a lot lot. 
+    if len(resp.raw_response.content) > 10_000_000:
+        return list()
+
     # parse the content with beautifulsoup]
     try: 
         soup = BeautifulSoup(resp.raw_response.content, "lxml")
@@ -126,6 +130,11 @@ def extract_next_links(url, resp):
     # pages with less than 20 words can be considered low-information
     if len(words_lowercase) < 20:
         return list()
+
+    # Avoid large pages with low information content.
+    # 1 MB , assuming 30%$ of html is readable text, is 300KB of text. Assuming ASCII and 6 chars a word, thats 50k words approx.
+    if content_size > 1_000_000 and len(words_lowercase) < 500: # less than 1% density of words per expected text size, pretty reasonable                                                                               
+        return list() 
     
     global pages_crawled_since_prev_save, longest_page
 
@@ -195,11 +204,6 @@ def is_valid(url):
 
         if parsed.path.count('/') > 8:
             # If the path has more than 8 slashes, it's probably not a valid url
-            return False
-
-        if re.search(r"/\d{4}/\d{2}/\d{2}/", parsed.path):
-            # If the path contains a date, it's probably not a valid url or low value page
-            # For avoiding calendar traps if date not in query params
             return False
 
         path_parts = [p for p in parsed.path.split('/') if p] # don't include empty parts
