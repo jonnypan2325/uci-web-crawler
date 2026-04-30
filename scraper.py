@@ -115,7 +115,7 @@ def extract_next_links(url, resp):
             continue
         if href.startswith(("mailto:", "javascript:", "tel:", "ftp:")):
             continue
-        absolute = urljoin(resp.raw_response.url, href)
+        absolute, _ = urldefrag(urljoin(resp.raw_response.url, href))
         extracted_links.append(absolute)
 
     return extracted_links
@@ -125,6 +125,9 @@ def is_valid(url):
     # If you decide to crawl it, return True; otherwise return False.
     # There are already some conditions that return False.
     try:
+        if not isinstance(url, str):
+            return False
+        url, _ = urldefrag(url)
         parsed = urlparse(url)
         
         # only crawl urls in the domain mentioned on canvas

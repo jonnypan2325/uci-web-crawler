@@ -56,7 +56,14 @@ def test_disallowed_file_extension_case_insensitive():
     assert is_valid("https://cs.uci.edu/paper.PDF") is False
 
 
-def test_non_string_input_raises_typeerror():
-    # urlparse(None) does not raise in this environment; `is_valid` should fail closed.
+def test_is_valid_strips_url_fragment():
+    assert is_valid("https://cs.uci.edu/page.html#section") is True
+
+
+def test_disallowed_extension_still_rejected_when_fragment_present():
+    assert is_valid("https://cs.uci.edu/paper.pdf#section") is False
+
+
+def test_non_string_input_rejected():
     assert is_valid(None) is False
 
