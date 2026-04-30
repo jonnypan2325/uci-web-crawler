@@ -9,6 +9,18 @@ analytics = "analytics.json"
 save_interval = 50
 pages_crawled_since_prev_save = 0
 
+# stop words from : https://gist.github.com/sebleier/554280
+
+STOP_WORDS = set(["i", "me", "my", "myself", "we", "our", "ours", "ourselves", "you", "your", "yours", "yourself", 
+                  "yourselves", "he", "him", "his", "himself", "she", "her", "hers", "herself", "it", "its", "itself", 
+                  "they", "them", "their", "theirs", "themselves", "what", "which", "who", "whom", "this", "that", "these", 
+                  "those", "am", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "having", "do", "does", 
+                  "did", "doing", "a", "an", "the", "and", "but", "if", "or", "because", "as", "until", "while", "of", "at", "by", 
+                  "for", "with", "about", "against", "between", "into", "through", "during", "before", "after", "above", 
+                  "below", "to", "from", "up", "down", "in", "out", "on", "off", "over", "under", "again", "further", 
+                  "then", "once", "here", "there", "when", "where", "why", "how", "all", "any", "both", "each", "few", 
+                  "more", "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too", 
+                  "very", "s", "t", "can", "will", "just", "don", "should", "now"])
 
 def load_analytics():
     global unique_pages, longest_page, subdomains, word_counts
@@ -104,6 +116,51 @@ def extract_next_links(url, resp):
         soup = BeautifulSoup(resp.raw_response.content, "lxml")
     except Exception as e:
         return list()
+    
+    # we can track only the alphabetic words, as the analytics doesn't care about numbers or special characters
+    page_text_content = soup.get_text(separator=" ")
+
+    words = re.findall(r"\b[a-zA-Z]+\b", page_text_content)
+    words_lowercase = [word.lower() for word in words]
+
+    # pages with less than 20 words can be considered low-information
+    if len(words_lowercase) < 20:
+        return list()
+    
+    global pages_crawled_since_prev_save, longest_page
+
+
+    # handle url redirects
+    if resp.raw_response and resp.raw_response.url:
+        url_final = resp.raw_response.url 
+    else:
+        url_final = url
+
+    defragged_url, _ = urldefrag(url_final)
+
+    if defragged_url not in unique_pages:
+        unique_pages.add(defragged_url)
+        pages_crawled_since_prev_save += 1
+
+        # only store tokens that are meaningful
+        for word in words_lowercase:
+            if len(word) > 1 and word not in STOP_WORDS:
+                word_counts[word] += 1
+        
+        # update longest page
+        if len(words_lowercase) > longest_page[1]:
+            longest_page = (defragged_url, len(words_lowercase))
+
+        
+        host = urlparse(defragged_url).netloc
+        if host.endswith(".uci.edu"):
+            subdomains[host].add(defragged_url)
+        
+        # flush to disk
+        if pages_crawled_since_prev_save >= save_interval:
+            save_analytics()
+            generate_report()
+            pages_crawled_since_prev_save = 0
     
     # I initially wanted to use a set here to avoid duplicates, but frontier is already doing that check
     # extract links and normalize
