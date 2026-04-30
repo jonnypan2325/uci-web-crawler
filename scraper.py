@@ -127,9 +127,11 @@ def extract_next_links(url, resp):
 
     words = re.findall(r"\b[a-zA-Z]+\b", page_text_content)
     words_lowercase = [word.lower() for word in words]
+    #print("Number of words:", len(words_lowercase)) debugging 
+    #print("Words:", words_lowercase) debugging
 
-    # pages with less than 20 words can be considered low-information
-    if len(words_lowercase) < 20:
+    # pages with less than 50 words can be considered low-information
+    if len(words_lowercase) < 50:
         return list()
 
     # Avoid large pages with low information content.
