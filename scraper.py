@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urlparse, urljoin, urldefrag
+from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from bs4 import BeautifulSoup
 import os
 import json
@@ -186,6 +186,26 @@ def is_valid(url):
             return False
         url, _ = urldefrag(url)
         parsed = urlparse(url)
+        query_params = parse_qs(parsed.query)
+
+        # Trap Prevention
+        if query_params:
+            # If there are query parameters, don't crawl to avoid common traps. Calendar traps are a notable one
+            return False
+
+        if parsed.path.count('/') > 8:
+            # If the path has more than 8 slashes, it's probably not a valid url
+            return False
+
+        if re.search(r"/\d{4}/\d{2}/\d{2}/", parsed.path):
+            # If the path contains a date, it's probably not a valid url or low value page
+            # For avoiding calendar traps if date not in query params
+            return False
+
+        path_parts = [p for p in parsed.path.split('/') if p] # don't include empty parts
+        if len(path_parts) != len(set(path_parts)):
+            # Avoid repeating paths
+            return False
         
         # only crawl urls in the domain mentioned on canvas
         host = (parsed.hostname or "").lower().rstrip(".")
