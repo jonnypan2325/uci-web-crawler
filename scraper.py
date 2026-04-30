@@ -3,6 +3,7 @@ from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from bs4 import BeautifulSoup
 import os
 import json
+import atexit
 from collections import defaultdict
 
 analytics = "analytics.json"
@@ -63,6 +64,37 @@ def save_analytics():
     with open(temp_file, "w") as f:
         json.dump(data, f, indent=4)
     os.replace(temp_file, analytics)
+
+def reset_analytics():
+    global unique_pages, longest_page, subdomains, word_counts
+    global pages_crawled_since_prev_save
+    unique_pages = set()
+    longest_page = ("", 0)
+    subdomains = defaultdict(set)
+    word_counts = defaultdict(int)
+    pages_crawled_since_prev_save = 0
+
+    # remove the persisted file so a crash mid-run can't accidentally resume the wiped state
+    for path in (analytics, analytics + ".tmp"):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+def init_analytics(restart):
+    if restart:
+        reset_analytics()
+    else:
+        load_analytics()
+    atexit.register(flush_on_exit)
+
+def flush_on_exit():
+    try:
+        save_analytics()
+        generate_report()
+    except Exception:
+        pass
+
 
 def generate_report():
     top_words = sorted(word_counts.items(), key=lambda x: (-x[1], x[0]))[:50]
