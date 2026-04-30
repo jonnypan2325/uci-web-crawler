@@ -11,6 +11,11 @@ from types import SimpleNamespace
 
 from utils.config import Config
 import scraper
+from bs4 import BeautifulSoup
+import re
+from collections import Counter
+
+from scraper import STOP_WORDS
 
 
 def _direct_fetch_response(url: str):
@@ -45,6 +50,30 @@ def main() -> int:
     scraper.load_analytics()
 
     links = scraper.extract_next_links(test_url, resp)
+    content_type = resp.raw_response.headers.get("Content-Type", "")
+    content_size = len(resp.raw_response.content)
+    print("Content type:", content_type)
+    print("Content size:", content_size)
+    try: 
+        soup = BeautifulSoup(resp.raw_response.content, "lxml")
+    except Exception as e:
+        return list()
+    
+    # we can track only the alphabetic words, as the analytics doesn't care about numbers or special characters
+    page_text_content = soup.get_text(separator=" ")
+    page_text_content = page_text_content.replace("’", "'").replace("‘", "'") # normalize by replacing apostrophes with single quotes
+        # tested and actually doesn't change word count for the dataset tested. Will leave for now.
+        
+    # regex to match words with apostrophes
+    words = re.findall(r"\b[a-zA-Z]+(?:'[a-zA-Z]+)*\b", page_text_content)
+    words_lowercase = [word.lower() for word in words if word.lower() not in STOP_WORDS]
+    print("Number of words:", len(words_lowercase))
+    if len(words_lowercase) <= 100:
+        print("Words:", words_lowercase)
+    else:
+        print("Too many words to print")
+    freq = Counter(words_lowercase)
+    print("Frequency of words:", freq.most_common(10))
 
     print("requested:", test_url)
     print("fetched:", resp.url)

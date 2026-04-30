@@ -156,9 +156,12 @@ def extract_next_links(url, resp):
     
     # we can track only the alphabetic words, as the analytics doesn't care about numbers or special characters
     page_text_content = soup.get_text(separator=" ")
-
-    words = re.findall(r"\b[a-zA-Z]+\b", page_text_content)
-    words_lowercase = [word.lower() for word in words]
+    page_text_content = page_text_content.replace("’", "'").replace("‘", "'") # normalize by replacing apostrophes with single quotes
+        # tested and actually doesn't change word count for the dataset tested. Will leave for now.
+        
+    # regex to match words with apostrophes(not at front or end)
+    words = re.findall(r"\b[a-zA-Z]+(?:'[a-zA-Z]+)*\b", page_text_content)
+    words_lowercase = [word.lower() for word in words if word.lower() not in STOP_WORDS] # only include words not in stop words set
     #print("Number of words:", len(words_lowercase)) debugging 
     #print("Words:", words_lowercase) debugging
 
