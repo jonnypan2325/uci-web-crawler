@@ -244,6 +244,14 @@ def is_valid(url):
             # If the path has more than 8 slashes, it's probably not a valid url
             return False
 
+        # Avoid calendar traps if date in path in format YYYY-MM-DD or YYYY-MM at the end.
+        # Only check at end because news articles sometimes have dates at start of path or middle.
+        # Allow an optional trailing slash.
+        if re.search(r"/\d{4}-\d{2}-\d{2}/?$", parsed.path) or re.search(r"/\d{4}-\d{2}/?$", parsed.path):
+            # If the path contains a date, it's probably not a valid url or low value page
+            # For avoiding calendar traps if date not in query params
+            return False
+
         path_parts = [p for p in parsed.path.split('/') if p] # don't include empty parts
         if len(path_parts) != len(set(path_parts)):
             # Avoid repeating paths

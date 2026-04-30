@@ -64,6 +64,20 @@ def test_disallowed_extension_still_rejected_when_fragment_present():
     assert is_valid("https://cs.uci.edu/paper.pdf#section") is False
 
 
+def test_path_ending_with_date_yyyy_mm_dd_rejected():
+    assert is_valid("https://cs.uci.edu/2024-03-15") is False
+    assert is_valid("https://cs.uci.edu/2024-03-15/") is False
+    assert is_valid("https://cs.uci.edu/news/2024-03-15") is False
+    assert is_valid("https://cs.uci.edu/news/2024-03-15/") is False
+
+
+def test_path_ending_with_date_yyyy_mm_rejected():
+    assert is_valid("https://cs.uci.edu/2024-03") is False
+    assert is_valid("https://cs.uci.edu/2024-03/") is False
+    assert is_valid("https://cs.uci.edu/news/2024-03") is False
+    assert is_valid("https://cs.uci.edu/news/2024-03/") is False
+
+
 def test_non_string_input_rejected():
     assert is_valid(None) is False
 
