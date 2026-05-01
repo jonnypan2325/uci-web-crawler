@@ -131,6 +131,9 @@ LOGIN_WALLED_PREFIXES = {
     ("wiki.ics.uci.edu", "/doku.php"),
 }
 
+# Path that has consistent low info pages
+LOW_INFO_PATH_SEGMENTS = ("/files/", "/page/", "/tag/", "/author/", "/category/")
+
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
@@ -285,6 +288,11 @@ def is_valid(url):
         # skip login pages
         for blocked_host, blocked_prefix in LOGIN_WALLED_PREFIXES:
             if host == blocked_host and parsed.path.startswith(blocked_prefix):
+                return False
+
+        path_lower = parsed.path.lower()
+        for segment in LOW_INFO_PATH_SEGMENTS:
+            if segment in path_lower:
                 return False
 
         return not re.match(
