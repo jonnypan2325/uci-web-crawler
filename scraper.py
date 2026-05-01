@@ -5,10 +5,12 @@ import os
 import json
 import atexit
 from collections import defaultdict
+import threading
 
 analytics = "analytics.json"
 save_interval = 50
 pages_crawled_since_prev_save = 0
+analytics_lock = threading.Lock()
 
 # stop words from : https://gist.github.com/sebleier/554280
 
@@ -90,8 +92,9 @@ def init_analytics(restart):
 
 def flush_on_exit():
     try:
-        save_analytics()
-        generate_report()
+        with analytics_lock:
+            save_analytics()
+            generate_report()
     except Exception:
         pass
 
@@ -185,30 +188,31 @@ def extract_next_links(url, resp):
 
     defragged_url, _ = urldefrag(url_final)
 
-    if defragged_url not in unique_pages:
-        unique_pages.add(defragged_url)
-        pages_crawled_since_prev_save += 1
+    with analytics_lock:
+        if defragged_url not in unique_pages:
+            unique_pages.add(defragged_url)
+            pages_crawled_since_prev_save += 1
 
-        # only store tokens that are meaningful
-        for word in words_lowercase:
-            if len(word) > 1 and word not in STOP_WORDS:
-                word_counts[word] += 1
-        
-        # update longest page
-        if len(words_lowercase) > longest_page[1]:
-            longest_page = (defragged_url, len(words_lowercase))
+            # only store tokens that are meaningful
+            for word in words_lowercase:
+                if len(word) > 1 and word not in STOP_WORDS:
+                    word_counts[word] += 1
+            
+            # update longest page
+            if len(words_lowercase) > longest_page[1]:
+                longest_page = (defragged_url, len(words_lowercase))
 
+            
+            host = urlparse(defragged_url).netloc
+            if host.endswith(".uci.edu"):
+                subdomains[host].add(defragged_url)
+            
+            # flush to disk
+            if pages_crawled_since_prev_save >= save_interval:
+                save_analytics()
+                generate_report()
+                pages_crawled_since_prev_save = 0
         
-        host = urlparse(defragged_url).netloc
-        if host.endswith(".uci.edu"):
-            subdomains[host].add(defragged_url)
-        
-        # flush to disk
-        if pages_crawled_since_prev_save >= save_interval:
-            save_analytics()
-            generate_report()
-            pages_crawled_since_prev_save = 0
-    
     # I initially wanted to use a set here to avoid duplicates, but frontier is already doing that check
     # extract links and normalize
     # make sure not empty and not a link that we don't wanna crawl
