@@ -73,19 +73,26 @@ class Frontier(object):
             while True:
                 now = time.monotonic()
                 next_wait = None
-                for url in self.to_be_downloaded:
+                # Don't mutate the deque while iterating it. We rotate
+                # through at most one full pass looking for an eligible URL.
+                for _ in range(len(self.to_be_downloaded)):
+                    url = self.to_be_downloaded.popleft()
                     domain = self.get_domain(url)
+
                     if domain in self.domain_in_use:
+                        self.to_be_downloaded.append(url)
                         continue
+
                     last_accessed = self.domain_last_accessed.get(domain, 0)
                     remaining = self.config.time_delay - (now - last_accessed)
                     if remaining > 0:
                         if next_wait is None or remaining < next_wait:
                             next_wait = remaining
+                        self.to_be_downloaded.append(url)
                         continue
-                    self.to_be_downloaded.remove(url)
+
+                    # Eligible, so reserve this domain and return the URL.
                     self.domain_in_use.add(domain)
-                    self.domain_last_accessed[domain] = now
                     return url
                 if not self.to_be_downloaded and not self.domain_in_use:
                     self.cond.notify_all()
@@ -93,14 +100,15 @@ class Frontier(object):
                 # Either nothing is eligible yet (politeness) or the queue is
                 # empty but other workers are still in flight. Wait until a
                 # worker calls add_url / finish_domain, or the politeness
-                # window for the soonest-eligible domain expires.
-                self.cond.wait(timeout=next_wait)
+                # window for the soonest eligible domain expires.
+                self.cond.wait(timeout=next_wait) # Releases lock when waiting, reacquires when wakes up
 
     def finish_domain(self, url):
         domain = self.get_domain(url)
         with self.lock:
-            self.domain_in_use.discard(domain)
+            # Start the politeness cooldown after the request completes.
             self.domain_last_accessed[domain] = time.monotonic()
+            self.domain_in_use.discard(domain)
             self.cond.notify_all()
 
 
