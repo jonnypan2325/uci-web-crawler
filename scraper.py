@@ -126,6 +126,11 @@ def generate_report():
     
 ALLOWED_DOMAIN_SUFFIXES = {"ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu"}
 
+# URL prefixes that require logins that we should skip crawling
+LOGIN_WALLED_PREFIXES = {
+    ("wiki.ics.uci.edu", "/doku.php"),
+}
+
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
@@ -272,10 +277,15 @@ def is_valid(url):
         
         # only crawl urls in the domain mentioned on canvas
         host = (parsed.hostname or "").lower().rstrip(".")
-        if not any(host == suffix or host.endswith("." + suffix) 
-            for suffix in ALLOWED_DOMAIN_SUFFIXES): 
+        if not any(host == suffix or host.endswith("." + suffix)
+            for suffix in ALLOWED_DOMAIN_SUFFIXES):
             # check if the host is in the allowed domain suffixes or a complete match
             return False
+
+        # skip login pages
+        for blocked_host, blocked_prefix in LOGIN_WALLED_PREFIXES:
+            if host == blocked_host and parsed.path.startswith(blocked_prefix):
+                return False
 
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
