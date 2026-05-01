@@ -132,11 +132,30 @@ LOGIN_WALLED_PREFIXES = {
 }
 
 # Path that has consistent low info pages
-LOW_INFO_PATH_SEGMENTS = ("/files/", "/page/", "/tag/", "/author/", "/category/")
+LOW_INFO_PATH_SEGMENTS = ("/files/", "/page/", "/tag/", "/author/", "/category/", "/genealogy/")
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
+
+# single out site header and navigation bars
+BOILERPLATE_ATTR_PATTERNS = re.compile(
+    r"(nav|menu|sidebar|footer|header|breadcrumb|skip-link|site-info|widget)",
+    re.IGNORECASE,
+)
+
+def strip_boilerplate(soup):
+    # remove non-text in-place so they don't pollute word counts.
+    for tag in soup(["script", "style", "noscript", "nav", "header", "footer", "aside"]):
+        tag.decompose()
+
+    for tag in soup.find_all(attrs={"class": BOILERPLATE_ATTR_PATTERNS}):
+        tag.decompose()
+    for tag in soup.find_all(attrs={"id": BOILERPLATE_ATTR_PATTERNS}):
+        tag.decompose()
+
+    for tag in soup.find_all(attrs={"role": ["navigation", "banner", "contentinfo", "complementary"]}):
+        tag.decompose()
 
 def extract_next_links(url, resp):
     # Implementation required.
@@ -169,11 +188,16 @@ def extract_next_links(url, resp):
         return list()
 
     # parse the content with beautifulsoup]
-    try: 
+    try:
         soup = BeautifulSoup(resp.raw_response.content, "lxml")
     except Exception as e:
         return list()
-    
+
+    # extract links before stripping 
+    raw_hrefs = [a["href"] for a in soup.find_all("a", href=True)]
+
+    strip_boilerplate(soup)
+
     # we can track only the alphabetic words, as the analytics doesn't care about numbers or special characters
     page_text_content = soup.get_text(separator=" ")
     page_text_content = page_text_content.replace("’", "'").replace("‘", "'") # normalize by replacing apostrophes with single quotes
@@ -234,9 +258,8 @@ def extract_next_links(url, resp):
     # extract links and normalize
     # make sure not empty and not a link that we don't wanna crawl
     extracted_links = []
-    for anchor in soup.find_all("a", href=True):
-        href = anchor["href"]
-        if not href: 
+    for href in raw_hrefs:
+        if not href:
             continue
         if href.startswith(("mailto:", "javascript:", "tel:", "ftp:")):
             continue
