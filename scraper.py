@@ -5,10 +5,12 @@ import os
 import json
 import atexit
 from collections import defaultdict
+import threading
 
 analytics = "analytics.json"
 save_interval = 50
 pages_crawled_since_prev_save = 0
+analytics_lock = threading.Lock()
 
 # stop words from: https://www.ranks.nl/stopwords (referenced on Canvas)
 STOP_WORDS = frozenset([
@@ -99,8 +101,9 @@ def init_analytics(restart):
 
 def flush_on_exit():
     try:
-        save_analytics()
-        generate_report()
+        with analytics_lock:
+            save_analytics()
+            generate_report()
     except Exception:
         pass
 
@@ -123,9 +126,36 @@ def generate_report():
     
 ALLOWED_DOMAIN_SUFFIXES = {"ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu"}
 
+# URL prefixes that require logins that we should skip crawling
+LOGIN_WALLED_PREFIXES = {
+    ("wiki.ics.uci.edu", "/doku.php"),
+}
+
+# Path that has consistent low info pages
+LOW_INFO_PATH_SEGMENTS = ("/files/", "/page/", "/tag/", "/author/", "/category/", "/genealogy/")
+
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
+
+# single out site header and navigation bars
+BOILERPLATE_ATTR_PATTERNS = re.compile(
+    r"(nav|menu|sidebar|footer|header|breadcrumb|skip-link|site-info|widget)",
+    re.IGNORECASE,
+)
+
+def strip_boilerplate(soup):
+    # remove non-text in-place so they don't pollute word counts.
+    for tag in soup(["script", "style", "noscript", "nav", "header", "footer", "aside"]):
+        tag.decompose()
+
+    for tag in soup.find_all(attrs={"class": BOILERPLATE_ATTR_PATTERNS}):
+        tag.decompose()
+    for tag in soup.find_all(attrs={"id": BOILERPLATE_ATTR_PATTERNS}):
+        tag.decompose()
+
+    for tag in soup.find_all(attrs={"role": ["navigation", "banner", "contentinfo", "complementary"]}):
+        tag.decompose()
 
 def extract_next_links(url, resp):
     # Implementation required.
@@ -158,11 +188,16 @@ def extract_next_links(url, resp):
         return list()
 
     # parse the content with beautifulsoup]
-    try: 
+    try:
         soup = BeautifulSoup(resp.raw_response.content, "lxml")
     except Exception as e:
         return list()
-    
+
+    # extract links before stripping 
+    raw_hrefs = [a["href"] for a in soup.find_all("a", href=True)]
+
+    strip_boilerplate(soup)
+
     # we can track only the alphabetic words, as the analytics doesn't care about numbers or special characters
     page_text_content = soup.get_text(separator=" ")
     page_text_content = page_text_content.replace("’", "'").replace("‘", "'") # normalize by replacing apostrophes with single quotes
@@ -194,37 +229,37 @@ def extract_next_links(url, resp):
 
     defragged_url, _ = urldefrag(url_final)
 
-    if defragged_url not in unique_pages:
-        unique_pages.add(defragged_url)
-        pages_crawled_since_prev_save += 1
+    with analytics_lock:
+        if defragged_url not in unique_pages:
+            unique_pages.add(defragged_url)
+            pages_crawled_since_prev_save += 1
 
-        # only store tokens that are meaningful
-        for word in words_lowercase:
-            if len(word) > 1 and word not in STOP_WORDS:
-                word_counts[word] += 1
-        
-        # update longest page
-        if len(words_lowercase) > longest_page[1]:
-            longest_page = (defragged_url, len(words_lowercase))
+            # only store tokens that are meaningful
+            for word in words_lowercase:
+                if len(word) > 1 and word not in STOP_WORDS:
+                    word_counts[word] += 1
+            
+            # update longest page
+            if len(words_lowercase) > longest_page[1]:
+                longest_page = (defragged_url, len(words_lowercase))
 
+            
+            host = urlparse(defragged_url).netloc
+            if host.endswith(".uci.edu"):
+                subdomains[host].add(defragged_url)
+            
+            # flush to disk
+            if pages_crawled_since_prev_save >= save_interval:
+                save_analytics()
+                generate_report()
+                pages_crawled_since_prev_save = 0
         
-        host = urlparse(defragged_url).netloc
-        if host.endswith(".uci.edu"):
-            subdomains[host].add(defragged_url)
-        
-        # flush to disk
-        if pages_crawled_since_prev_save >= save_interval:
-            save_analytics()
-            generate_report()
-            pages_crawled_since_prev_save = 0
-    
     # I initially wanted to use a set here to avoid duplicates, but frontier is already doing that check
     # extract links and normalize
     # make sure not empty and not a link that we don't wanna crawl
     extracted_links = []
-    for anchor in soup.find_all("a", href=True):
-        href = anchor["href"]
-        if not href: 
+    for href in raw_hrefs:
+        if not href:
             continue
         if href.startswith(("mailto:", "javascript:", "tel:", "ftp:")):
             continue
@@ -268,10 +303,20 @@ def is_valid(url):
         
         # only crawl urls in the domain mentioned on canvas
         host = (parsed.hostname or "").lower().rstrip(".")
-        if not any(host == suffix or host.endswith("." + suffix) 
-            for suffix in ALLOWED_DOMAIN_SUFFIXES): 
+        if not any(host == suffix or host.endswith("." + suffix)
+            for suffix in ALLOWED_DOMAIN_SUFFIXES):
             # check if the host is in the allowed domain suffixes or a complete match
             return False
+
+        # skip login pages
+        for blocked_host, blocked_prefix in LOGIN_WALLED_PREFIXES:
+            if host == blocked_host and parsed.path.startswith(blocked_prefix):
+                return False
+
+        path_lower = parsed.path.lower()
+        for segment in LOW_INFO_PATH_SEGMENTS:
+            if segment in path_lower:
+                return False
 
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"

@@ -19,16 +19,22 @@ class Worker(Thread):
         
     def run(self):
         while True:
-            tbd_url = self.frontier.get_tbd_url()
+            tbd_url = self.frontier.get_tbd_url() # Should handle the politeness delay instead across all workers
             if not tbd_url:
                 self.logger.info("Frontier is empty. Stopping Crawler.")
                 break
-            resp = download(tbd_url, self.config, self.logger)
-            self.logger.info(
-                f"Downloaded {tbd_url}, status <{resp.status}>, "
-                f"using cache {self.config.cache_server}.")
-            scraped_urls = scraper.scraper(tbd_url, resp)
-            for scraped_url in scraped_urls:
-                self.frontier.add_url(scraped_url)
-            self.frontier.mark_url_complete(tbd_url)
-            time.sleep(self.config.time_delay)
+            try:
+                resp = download(tbd_url, self.config, self.logger)
+                self.logger.info(
+                    f"Downloaded {tbd_url}, status <{resp.status}>, "
+                    f"using cache {self.config.cache_server}.")
+                scraped_urls = scraper.scraper(tbd_url, resp)
+                for scraped_url in scraped_urls:
+                    self.frontier.add_url(scraped_url)
+                self.frontier.mark_url_complete(tbd_url)
+            finally:
+                self.frontier.finish_domain(tbd_url)
+                
+            # Politeness delay is enforced centrally in Frontier (per-domain,
+            # across all workers). Sleeping here would unnecessarily throttle
+            # crawling across different domains.
