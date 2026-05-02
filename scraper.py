@@ -157,6 +157,83 @@ def strip_boilerplate(soup):
     for tag in soup.find_all(attrs={"role": ["navigation", "banner", "contentinfo", "complementary"]}):
         tag.decompose()
 
+
+# URLs embedded in plain-text pages (e.g. large .txt word lists)
+PLAIN_TEXT_URL_RE = re.compile(r"\bhttps?://[^\s<>\]\)\"']+", re.IGNORECASE)
+
+
+def words_from_page_text(page_text):
+    """Return filtered lowercase word tokens (same rules as HTML extraction)."""
+    page_text = page_text.replace("’", "'").replace("‘", "'")
+    words = re.findall(r"\b[a-zA-Z]+(?:'[a-zA-Z]+)*\b", page_text)
+    return [w.lower() for w in words if w.lower() not in STOP_WORDS]
+
+
+def record_page_analytics(defragged_url, words_lowercase):
+    """If this URL is new, update word counts, longest page, subdomains; may flush to disk."""
+    global pages_crawled_since_prev_save, longest_page
+
+    with analytics_lock:
+        if defragged_url not in unique_pages:
+            unique_pages.add(defragged_url)
+            pages_crawled_since_prev_save += 1
+
+            for word in words_lowercase:
+                if len(word) > 1 and word not in STOP_WORDS:
+                    word_counts[word] += 1
+
+            if len(words_lowercase) > longest_page[1]:
+                longest_page = (defragged_url, len(words_lowercase))
+
+            host = urlparse(defragged_url).netloc
+            if host.endswith(".uci.edu"):
+                subdomains[host].add(defragged_url)
+
+            if pages_crawled_since_prev_save >= save_interval:
+                save_analytics()
+                generate_report()
+                pages_crawled_since_prev_save = 0
+
+
+def extract_urls_from_plain_text(text, base_url):
+    """Best-effort discovery of absolute http(s) URLs inside plain text."""
+    seen = set()
+    out = []
+    for m in PLAIN_TEXT_URL_RE.finditer(text):
+        u = m.group(0).rstrip(").,;:'\"")
+        if u in seen:
+            continue
+        seen.add(u)
+        absolute, _ = urldefrag(urljoin(base_url, u))
+        out.append(absolute)
+    return out
+
+
+def _extract_plaintext(url, resp, content_size):
+    """Handle text/plain and .txt bodies (not parsed as HTML)."""
+    try:
+        text = resp.raw_response.content.decode("utf-8", errors="replace")
+    except Exception:
+        return list()
+
+    words_lowercase = words_from_page_text(text)
+    if len(words_lowercase) < 50:
+        return list()
+    if content_size > 1_000_000 and len(words_lowercase) < 500:
+        return list()
+
+    if resp.raw_response and resp.raw_response.url:
+        url_final = resp.raw_response.url
+    else:
+        url_final = url
+    defragged_url, _ = urldefrag(url_final)
+
+    record_page_analytics(defragged_url, words_lowercase)
+
+    base = resp.raw_response.url if resp.raw_response else url
+    return extract_urls_from_plain_text(text, base)
+
+
 def extract_next_links(url, resp):
     # Implementation required.
     # url: the URL that was used to get the page
@@ -176,38 +253,43 @@ def extract_next_links(url, resp):
         return list()
     elif not resp.raw_response.content:
         return list()
-    
-    # only parse if the content type is html, not pdfs or images or other files
-    content_type = resp.raw_response.headers.get("Content-Type", "")
-    if content_type and "text/html" not in content_type:
-        return list()
 
-    # Avoid really really large files. 10MB is a lot lot. 
-    content_size = len(resp.raw_response.content)
+    content = resp.raw_response.content
+    content_size = len(content)
+
+    # Avoid really really large files. 10MB is a lot lot.
     if content_size > 10_000_000:
         return list()
 
-    # parse the content with beautifulsoup]
-    try:
-        soup = BeautifulSoup(resp.raw_response.content, "lxml")
-    except Exception as e:
+    content_type = (resp.raw_response.headers.get("Content-Type") or "").lower()
+    if resp.raw_response.url:
+        path_for_type = urlparse(urldefrag(resp.raw_response.url)[0]).path.lower()
+    else:
+        path_for_type = urlparse(urldefrag(url)[0]).path.lower()
+
+    # Plain text: often Content-Type: text/plain; also handle .txt when servers omit type.
+    if ("text/plain" in content_type) or (
+        path_for_type.endswith(".txt") and "text/html" not in content_type
+    ):
+        return _extract_plaintext(url, resp, content_size)
+
+    # Non-HTML explicit types (PDF, images, etc.) — no analytics, no links.
+    if content_type and "text/html" not in content_type:
         return list()
 
-    # extract links before stripping 
+    # parse HTML (explicit text/html, or unknown/empty Content-Type — legacy behavior)
+    try:
+        soup = BeautifulSoup(content, "lxml")
+    except Exception:
+        return list()
+
+    # extract links before stripping
     raw_hrefs = [a["href"] for a in soup.find_all("a", href=True)]
 
     strip_boilerplate(soup)
 
-    # we can track only the alphabetic words, as the analytics doesn't care about numbers or special characters
     page_text_content = soup.get_text(separator=" ")
-    page_text_content = page_text_content.replace("’", "'").replace("‘", "'") # normalize by replacing apostrophes with single quotes
-        # tested and actually doesn't change word count for the dataset tested. Will leave for now.
-        
-    # regex to match words with apostrophes(not at front or end)
-    words = re.findall(r"\b[a-zA-Z]+(?:'[a-zA-Z]+)*\b", page_text_content)
-    words_lowercase = [word.lower() for word in words if word.lower() not in STOP_WORDS] # only include words not in stop words set
-    #print("Number of words:", len(words_lowercase)) debugging 
-    #print("Words:", words_lowercase) debugging
+    words_lowercase = words_from_page_text(page_text_content)
 
     # pages with less than 50 words can be considered low-information
     if len(words_lowercase) < 50:
@@ -216,44 +298,18 @@ def extract_next_links(url, resp):
     # Avoid large pages with low information content.
     # 1 MB , assuming 30%$ of html is readable text, is 300KB of text. Assuming ASCII and 6 chars a word, thats 50k words approx.
     if content_size > 1_000_000 and len(words_lowercase) < 500: # less than 1% density of words per expected text size, pretty reasonable
-        return list() 
-    
-    global pages_crawled_since_prev_save, longest_page
-
+        return list()
 
     # handle url redirects
     if resp.raw_response and resp.raw_response.url:
-        url_final = resp.raw_response.url 
+        url_final = resp.raw_response.url
     else:
         url_final = url
 
     defragged_url, _ = urldefrag(url_final)
 
-    with analytics_lock:
-        if defragged_url not in unique_pages:
-            unique_pages.add(defragged_url)
-            pages_crawled_since_prev_save += 1
+    record_page_analytics(defragged_url, words_lowercase)
 
-            # only store tokens that are meaningful
-            for word in words_lowercase:
-                if len(word) > 1 and word not in STOP_WORDS:
-                    word_counts[word] += 1
-            
-            # update longest page
-            if len(words_lowercase) > longest_page[1]:
-                longest_page = (defragged_url, len(words_lowercase))
-
-            
-            host = urlparse(defragged_url).netloc
-            if host.endswith(".uci.edu"):
-                subdomains[host].add(defragged_url)
-            
-            # flush to disk
-            if pages_crawled_since_prev_save >= save_interval:
-                save_analytics()
-                generate_report()
-                pages_crawled_since_prev_save = 0
-        
     # I initially wanted to use a set here to avoid duplicates, but frontier is already doing that check
     # extract links and normalize
     # make sure not empty and not a link that we don't wanna crawl
