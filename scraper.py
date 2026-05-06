@@ -291,8 +291,8 @@ def extract_next_links(url, resp):
     page_text_content = soup.get_text(separator=" ")
     words_lowercase = words_from_page_text(page_text_content)
 
-    # pages with less than 50 words can be considered low-information
-    if len(words_lowercase) < 50:
+    # pages with less than 30 words can be considered low-information
+    if len(words_lowercase) < 30:
         return list()
 
     # Avoid large pages with low information content.
@@ -365,14 +365,14 @@ def is_valid(url):
             return False
 
         # skip login pages
-        for blocked_host, blocked_prefix in LOGIN_WALLED_PREFIXES:
-            if host == blocked_host and parsed.path.startswith(blocked_prefix):
-                return False
+        #for blocked_host, blocked_prefix in LOGIN_WALLED_PREFIXES:
+        #    if host == blocked_host and parsed.path.startswith(blocked_prefix):
+        #        return False
 
-        path_lower = parsed.path.lower()
-        for segment in LOW_INFO_PATH_SEGMENTS:
-            if segment in path_lower:
-                return False
+        #path_lower = parsed.path.lower()
+        #for segment in LOW_INFO_PATH_SEGMENTS:
+        #    if segment in path_lower:
+        #        return False
 
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
